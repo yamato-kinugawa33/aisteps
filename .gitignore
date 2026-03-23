@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.vevn/
 venv/
 backend/.env
 
@@ -22,3 +23,6 @@ Thumbs.db
 
 # Learning docs
 learn_docs/
+
+# Claude Code
+.claude
