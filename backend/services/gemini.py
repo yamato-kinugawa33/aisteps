@@ -2,11 +2,11 @@ import json
 import os
 import re
 from google import genai
-from dotenv import load_dotenv
 
-load_dotenv()
-
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("GEMINI_API_KEY is not set")
+client = genai.Client(api_key=api_key)
 MODEL = "gemini-2.5-flash"
 
 INITIAL_PROMPT = """\
