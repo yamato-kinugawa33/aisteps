@@ -8,7 +8,9 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Career Roadmap Generator")
 
-origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+if not origins:
+    raise ValueError("ALLOWED_ORIGINS is not set")
 
 app.add_middleware(
     CORSMiddleware,
