@@ -14,40 +14,51 @@
 
 ### 前提条件
 
-- Python 3.11+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) （Pythonパッケージマネージャー）
 - Node.js 18+
-- PostgreSQL
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
-### 1. バックエンド
+### 1. 環境変数の設定
+
+```bash
+cp backend/.env.example backend/.env
+# backend/.env を編集して GEMINI_API_KEY を設定
+```
+
+### 2. Docker で起動
+
+```bash
+docker compose up --build
+```
+
+| サービス | URL |
+|----------|-----|
+| フロントエンド | http://localhost:5173 |
+| バックエンド API | http://localhost:8000 |
+| DB | localhost:5432 |
+
+テーブルはバックエンド起動時に自動作成されます。
+
+### パッケージを追加する場合
+
+```bash
+# ローカルの uv でパッケージを追加（pyproject.toml と uv.lock を更新）
+cd backend
+uv add <package-name>
+
+# イメージを再ビルドしてコンテナに反映
+docker compose up --build
+```
+
+### ローカルに仮想環境を作る場合
+
+Docker を使わずにバックエンドをローカルで直接実行したい場合は、`uv sync` で仮想環境を作成する。
 
 ```bash
 cd backend
-cp .env.example .env
-# .env を編集して GEMINI_API_KEY と DATABASE_URL を設定
-
-pip install -r requirements.txt
-uvicorn main:app --reload
+uv sync          # uv.lock の内容をもとに .venv を作成
+uv run uvicorn main:app --reload
 ```
-
-API: http://localhost:8000
-
-### 2. フロントエンド
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-UI: http://localhost:5173
-
-### 3. DB 作成
-
-```sql
-CREATE DATABASE roadmap_db;
-```
-
-テーブルはバックエンド起動時に自動作成されます。
 
 ## 環境変数
 
