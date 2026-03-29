@@ -1,0 +1,79 @@
+name: Lint
+on: [push, pull_request]
+
+jobs:
+  # バックエンド：リンター（マージブロック）
+  backend-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check .
+
+  # バックエンド：フォーマッター（PRコメントのみ）
+  backend-format-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Run ruff format check
+        run: uv run ruff format --check . 2>&1 | tee format-result.txt
+        continue-on-error: true
+      - name: Comment on PR
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const result = fs.readFileSync('format-result.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## [Backend] フォーマット未適用のファイルがあります\n\`\`\`\n${result}\n\`\`\``
+            })
+
+  # フロントエンド：リンター（マージブロック）
+  frontend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: cd frontend && npm ci
+      - run: cd frontend && npm run lint
+
+  # フロントエンド：フォーマッター（PRコメントのみ）
+  frontend-format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: cd frontend && npm ci
+      - name: Run prettier check
+        run: cd frontend && npx prettier --check . 2>&1 | tee format-result.txt
+        continue-on-error: true
+      - name: Comment on PR
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const result = fs.readFileSync('format-result.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## [Frontend] フォーマット未適用のファイルがあります\n\`\`\`\n${result}\n\`\`\``
+            })

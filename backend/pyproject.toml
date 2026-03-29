@@ -13,3 +13,22 @@ dependencies = [
     "sqlalchemy>=2.0.48",
     "uvicorn[standard]>=0.42.0",
 ]
+
+#----------------------------------
+# ruff :formatter & linter
+#----------------------------------
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+    "ruff>=0.15.8",
+]
+
+[tool.ruff]       # 全体
+line-length = 88  # 一行最大
+
+[tool.ruff.lint]
+select = [        # linter
+    "E",          # スタイル系（インデント空白）
+    "F",          # バグ（未使用import 未定義変数）
+    "I"           # import並び順整理
+]

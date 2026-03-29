@@ -1,0 +1,23 @@
+repos:
+  # バックエンド（ruff）
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.0
+    hooks:
+      - id: ruff         # リンター：問題があればブロック
+      - id: ruff-format  # フォーマッター：自動整形
+
+  # フロントエンド（ESLint・Prettier）
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v9.0.0
+    hooks:
+      - id: eslint
+        files: \.(ts|tsx)$
+        additional_dependencies:
+          - eslint
+          - typescript-eslint
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        files: \.(ts|tsx|css|json)$

@@ -60,6 +60,17 @@ uv sync          # uv.lock の内容をもとに .venv を作成
 uv run uvicorn main:app --reload
 ```
 
+### コミット時のリンター・フォーマッター（任意）
+
+`git commit` 時にruff・ESLint・Prettierを自動実行したい場合は以下を1回だけ実行する。
+
+```bash
+# リポジトリルートで実行
+uv run --directory backend pre-commit install
+```
+
+設定後はコミット時に自動でチェックが走る。
+
 ## 環境変数
 
 | 変数名 | 説明 |
