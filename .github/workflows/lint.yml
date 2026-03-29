@@ -5,17 +5,25 @@ jobs:
   # バックエンド：リンター（マージブロック）
   backend-lint:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      - run: uv sync
       - run: uv run ruff check .
 
   # バックエンド：フォーマッター（PRコメントのみ）
   backend-format-check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      - run: uv sync
       - name: Run ruff format check
         run: uv run ruff format --check . 2>&1 | tee format-result.txt
         continue-on-error: true
