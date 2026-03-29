@@ -27,7 +27,6 @@ def create_roadmap(req: RoadmapRequest, db: Session = Depends(get_db)):
         user_input=req.goal,
         initial_json=initial_json,
         critique=critique_text,
-        final_text=None,
         final_json=final_json,
         model_name=model_name,
         input_tokens=input_tokens,

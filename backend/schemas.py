@@ -25,7 +25,6 @@ class RoadmapResponse(BaseModel):
     user_input: str
     initial_json: dict | None
     critique: str | None
-    final_text: str | None
     final_json: dict | None
     model_name: str | None
     input_tokens: int | None
