@@ -1,6 +1,7 @@
 import json
 import os
 import re
+
 from google import genai
 
 api_key = os.getenv("GEMINI_API_KEY")
@@ -86,15 +87,21 @@ def _tokens(response) -> tuple[int, int]:
 
 def run_pipeline(goal: str) -> tuple[dict, str, dict, str, int, int]:
     """
-    Returns: (initial_json, critique_text, final_json, model_name, total_input_tokens, total_output_tokens)
+    Returns:
+        (initial_json, critique_text, final_json, model_name,
+         total_input_tokens, total_output_tokens)
     """
-    r1 = client.models.generate_content(model=MODEL, contents=INITIAL_PROMPT.format(goal=goal))
+    r1 = client.models.generate_content(
+        model=MODEL, contents=INITIAL_PROMPT.format(goal=goal)
+    )
     initial = _extract_json(r1.text)
     in1, out1 = _tokens(r1)
 
     r2 = client.models.generate_content(
         model=MODEL,
-        contents=CRITIQUE_PROMPT.format(roadmap_json=json.dumps(initial, ensure_ascii=False, indent=2))
+        contents=CRITIQUE_PROMPT.format(
+            roadmap_json=json.dumps(initial, ensure_ascii=False, indent=2)
+        ),
     )
     critique_text = r2.text.strip()
     in2, out2 = _tokens(r2)
@@ -104,7 +111,7 @@ def run_pipeline(goal: str) -> tuple[dict, str, dict, str, int, int]:
         contents=REFINE_PROMPT.format(
             roadmap_json=json.dumps(initial, ensure_ascii=False, indent=2),
             critique=critique_text,
-        )
+        ),
     )
     final = _extract_json(r3.text)
     in3, out3 = _tokens(r3)

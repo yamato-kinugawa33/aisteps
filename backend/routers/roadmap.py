@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+
 from database import get_db
 from models import Roadmap
 from schemas import RoadmapRequest, RoadmapResponse, RoadmapSummary
@@ -11,7 +12,14 @@ router = APIRouter(prefix="/api/roadmaps", tags=["roadmaps"])
 @router.post("", response_model=RoadmapResponse)
 def create_roadmap(req: RoadmapRequest, db: Session = Depends(get_db)):
     try:
-        initial_json, critique_text, final_json, model_name, input_tokens, output_tokens = gemini.run_pipeline(req.goal)
+        (
+            initial_json,
+            critique_text,
+            final_json,
+            model_name,
+            input_tokens,
+            output_tokens,
+        ) = gemini.run_pipeline(req.goal)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI生成エラー: {str(e)}")
 
