@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models import Roadmap
-from schemas import RoadmapRequest, RoadmapResponse, RoadmapSummary
+from db.database import get_db
+from models.roadmap import Roadmap
+from schemas.roadmap import RoadmapRequest, RoadmapResponse, RoadmapSummary
 from services import gemini
 
 router = APIRouter(prefix="/api/roadmaps", tags=["roadmaps"])

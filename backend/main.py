@@ -7,7 +7,7 @@ load_dotenv()
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from database import Base, engine  # noqa: E402
+from db.database import Base, engine  # noqa: E402
 from routers import roadmap  # noqa: E402
 
 Base.metadata.create_all(bind=engine)
