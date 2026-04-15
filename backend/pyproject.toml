@@ -5,12 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "bcrypt>=4.0.0",
     "fastapi>=0.135.2",
     "google-genai>=1.68.0",
+    "httpx>=0.27.0",
     "psycopg[binary]>=3.3.3",
-    "pydantic>=2.12.5",
+    "pydantic[email]>=2.12.5",
     "python-dotenv>=1.2.2",
+    "pyjwt>=2.8.0",
     "pyyaml>=6.0.2",
+    "slowapi>=0.1.9",
     "sqlalchemy>=2.0.48",
     "uvicorn[standard]>=0.42.0",
 ]
@@ -22,8 +26,13 @@ dependencies = [
 dev = [
     "pre-commit>=4.5.1",
     "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
     "ruff>=0.15.8",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]       # 全体
 line-length = 88  # 一行最大
