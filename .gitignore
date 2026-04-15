@@ -21,7 +21,7 @@ frontend/.env.local
 Thumbs.db
 
 # Learning docs
-learn_docs/
+docs/learn_docs
 
 # Claude Code
 .claude

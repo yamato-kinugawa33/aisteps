@@ -1,0 +1,9 @@
+model: gemini-2.5-flash
+
+prompts:
+  initial:
+    file: initial.md
+  critique:
+    file: critique.md
+  refine:
+    file: refine.md

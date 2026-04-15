@@ -1,76 +1,30 @@
 import json
 import os
 import re
+from pathlib import Path
 
+import yaml
 from google import genai
 
 api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
     raise ValueError("GEMINI_API_KEY is not set")
 client = genai.Client(api_key=api_key)
-MODEL = "gemini-2.5-flash"
 
-INITIAL_PROMPT = """\
-あなたはキャリアアドバイザーです。
-ユーザーが「{goal}」を達成するためのキャリアロードマップを作成してください。
+PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+with open(PROMPTS_DIR / "config.yaml", encoding="utf-8") as f:
+    _config = yaml.safe_load(f)
 
-以下のJSON形式のみで回答してください。説明文や```json```などのマークダウンは不要です。
+MODEL = _config["model"]
 
-{{
-  "goal": "やりたいこと（文字列）",
-  "steps": [
-    {{
-      "order": 1,
-      "title": "ステップ名",
-      "description": "このステップで何をするかの説明",
-      "skills": ["スキル1", "スキル2"],
-      "duration": "目安期間（例: 1ヶ月）"
-    }}
-  ]
-}}
 
-ステップは4〜7個程度、現実的かつ具体的に作成してください。
-"""
+def _load(name: str) -> str:
+    return (PROMPTS_DIR / _config["prompts"][name]["file"]).read_text(encoding="utf-8")
 
-CRITIQUE_PROMPT = """\
-以下のキャリアロードマップを批評してください。
 
-{roadmap_json}
-
-以下の観点で問題点・改善点を具体的に指摘してください:
-- ステップの抜け漏れ
-- 期間設定の妥当性
-- スキルの具体性・過不足
-- ステップ間のつながりや論理的な順序
-- 全体的なバランス
-
-批評は日本語で、箇条書きで記述してください。
-"""
-
-REFINE_PROMPT = """\
-以下のキャリアロードマップと批評を踏まえて、改善版のロードマップを作成してください。
-
-【元のロードマップ】
-{roadmap_json}
-
-【批評】
-{critique}
-
-改善版は以下のJSON形式のみで回答してください。説明文や```json```などのマークダウンは不要です。
-
-{{
-  "goal": "やりたいこと（文字列）",
-  "steps": [
-    {{
-      "order": 1,
-      "title": "ステップ名",
-      "description": "このステップで何をするかの説明",
-      "skills": ["スキル1", "スキル2"],
-      "duration": "目安期間（例: 1ヶ月）"
-    }}
-  ]
-}}
-"""
+INITIAL_PROMPT = _load("initial")
+CRITIQUE_PROMPT = _load("critique")
+REFINE_PROMPT = _load("refine")
 
 
 def _extract_json(text: str) -> dict:
