@@ -53,6 +53,7 @@ def setup_db():
     """テスト用DBのテーブル作成・削除（session scope）"""
     # モデルを全てインポートして Base に登録する
     import models.roadmap  # noqa: F401
+    import models.refresh_token  # noqa: F401
     import models.user  # noqa: F401
 
     # SQLiteのためJSONB -> JSON に型を置き換える
