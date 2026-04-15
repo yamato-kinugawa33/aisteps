@@ -17,7 +17,7 @@
  */
 
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
 /**
@@ -30,7 +30,12 @@ export default function LoginPage() {
   const navigate = useNavigate();
 
   // useAuth: AuthContext から認証操作（login等）を取得するカスタムフック
-  const { login } = useAuth();
+  const { state, login } = useAuth();
+
+  // すでに認証済みの場合はホーム画面へリダイレクト（ログイン画面を見せない）
+  if (!state.isLoading && state.user) {
+    return <Navigate to="/" replace />;
+  }
 
   // フォームの入力値を管理するstate
   const [email, setEmail] = useState("");

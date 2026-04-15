@@ -14,7 +14,7 @@
  */
 
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
 /**
@@ -24,7 +24,12 @@ import { useAuth } from "../contexts/AuthContext";
  */
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const { register } = useAuth();
+  const { state, register } = useAuth();
+
+  // すでに認証済みの場合はホーム画面へリダイレクト（登録画面を見せない）
+  if (!state.isLoading && state.user) {
+    return <Navigate to="/" replace />;
+  }
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
