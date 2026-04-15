@@ -3,72 +3,84 @@ services/auth.py
 
 認証機能のビジネスロジックをまとめたサービス層です。
 
-【このファイルの役割】
-- ユーザー登録・ログイン・トークンリフレッシュなどの処理を実装します。
-- ルーター（routers/auth.py）はHTTPの入出力を担当し、
-  実際の処理はこのサービス層が担当します（責務の分離）。
-
 【セキュリティ上の重要な実装】
-- タイミング攻撃対策: ユーザーが存在しない場合もダミーハッシュで検証を実行し、
-  レスポンス時間の差からユーザーの存在を推測されないようにする
-- アカウントロック: 5回連続ログイン失敗で15分間ロック
+1. タイミング攻撃対策: ユーザー不在時もダミーハッシュで検証
+2. アカウントロック: 5回失敗→15分ロック
+3. Refresh Token Rotation: 使用済みトークン検知→全セッション強制終了
+4. トークンのDB管理: SHA-256ハッシュでDBに保存、即時失効可能
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from core.security import (
     create_access_token,
-    create_refresh_token,
-    decode_refresh_token,
+    generate_refresh_token,
+    get_refresh_token_expiry,
     hash_password,
+    hash_token,
     verify_password,
 )
+from models.refresh_token import RefreshToken
 from models.user import User
-from schemas.auth import MeResponse, TokenResponse, UserCreate
+from schemas.auth import MeResponse, UserCreate
 
-# セキュリティ関連のイベントをログに記録するロガー
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────
-# アカウントロック設定
-# ─────────────────────────────────────────────
-
-# 何回失敗したらロックするか
+# ─── アカウントロック設定 ───
 LOGIN_FAILURE_LIMIT = 5
-
-# ロックする時間（分）
 LOGIN_LOCK_DURATION_MINUTES = 15
 
-# タイミング攻撃対策用ダミーハッシュ
+# タイミング攻撃対策用ダミーハッシュ（モジュールロード時に一度だけ生成）
 # ユーザーが存在しない場合でも同じ時間がかかるように使用する
 _DUMMY_HASH = hash_password("dummy-password-for-timing-attack-prevention")
 
 
-def register_user(db: Session, user_data: UserCreate) -> TokenResponse:
+def _issue_refresh_token_to_db(user_id: int, db: Session) -> str:
     """
-    新規ユーザーを登録してJWTトークンを返します。
-
-    処理の流れ:
-        1. メールアドレスの重複チェック
-        2. パスワードをbcryptでハッシュ化
-        3. DBにユーザーを保存
-        4. アクセストークンとリフレッシュトークンを生成して返す
-
-    Args:
-        db: DBセッション
-        user_data: 登録するユーザーのメールアドレスとパスワード
+    新しいリフレッシュトークンを生成してDBに保存し、生のトークン値を返します。
+    生の値はクライアントに渡し、DBにはSHA-256ハッシュのみを保存します。
 
     Returns:
-        アクセストークンとリフレッシュトークン
+        生のリフレッシュトークン（クライアントに渡す値）
+    """
+    raw_token = generate_refresh_token()
+    token_hash = hash_token(raw_token)
+    expires_at = get_refresh_token_expiry()
+
+    record = RefreshToken(
+        user_id=user_id,
+        token_hash=token_hash,
+        expires_at=expires_at,
+    )
+    db.add(record)
+    db.commit()
+    return raw_token
+
+
+def _revoke_all_tokens_for_user(user_id: int, db: Session) -> None:
+    """
+    指定ユーザーの全リフレッシュトークンを失効させます。
+    リプレイ攻撃検知時やパスワード変更時に使用します。
+    """
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user_id,
+        RefreshToken.is_revoked.is_(False),
+    ).update({"is_revoked": True})
+    db.commit()
+    logger.warning("全リフレッシュトークンを失効: user_id=%d（リプレイ攻撃の可能性）", user_id)
+
+
+def register_user(db: Session, user_data: UserCreate) -> tuple[str, str]:
+    """
+    新規ユーザーを登録してトークンペア (access_token, refresh_token) を返します。
 
     Raises:
-        HTTPException 409: 同じメールアドレスが既に登録されている場合
+        HTTPException 409: メールアドレスが既に登録されている場合
     """
-    # メールアドレスの重複チェック
     existing = db.query(User).filter(User.email == user_data.email).first()
     if existing:
         raise HTTPException(
@@ -76,79 +88,57 @@ def register_user(db: Session, user_data: UserCreate) -> TokenResponse:
             detail="このメールアドレスは既に登録されています",
         )
 
-    # パスワードをハッシュ化して保存（平文パスワードはDBに保存しない）
     hashed = hash_password(user_data.password)
     user = User(email=user_data.email, hashed_password=hashed)
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    logger.info("新規ユーザー登録: email_prefix=%s", user_data.email[:3])
-
-    # トークンを発行して返す
+    logger.info("新規ユーザー登録完了: id=%d", user.id)
     access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token(user.id)
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    raw_refresh_token = _issue_refresh_token_to_db(user.id, db)
+    return access_token, raw_refresh_token
 
 
 def authenticate_user(email: str, password: str, db: Session) -> User:
     """
     メールアドレスとパスワードを検証してUserオブジェクトを返します。
 
-    セキュリティ考慮点:
-        - タイミング攻撃対策: ユーザーが存在しない場合もパスワード検証を実行する
-          （処理時間の差からユーザーの存在を推測されないようにする）
-        - アカウントロック: 5回失敗で15分間ロック
-        - ログイン成功時: 失敗カウントをリセット
-
-    Args:
-        email: ログインに使うメールアドレス
-        password: 入力されたパスワード
-        db: DBセッション
-
-    Returns:
-        認証成功したUserオブジェクト
+    【タイミング攻撃対策】
+    ユーザーが存在しない場合もダミーハッシュで verify_password を実行することで
+    レスポンス時間の差からユーザーの存在を推測されないようにしています。
 
     Raises:
         HTTPException 423: アカウントがロックされている場合
-        HTTPException 401: メールアドレスまたはパスワードが間違っている場合
+        HTTPException 401: 認証失敗の場合
     """
     user = db.query(User).filter(User.email == email).first()
 
-    # タイミング攻撃対策: ユーザーが存在しない場合もハッシュ検証を実行して時間を消費する
+    # ユーザー不在でも時間を消費してタイミング攻撃を防ぐ
     if not user:
-        # ダミーハッシュで検証（結果は使わない）
         verify_password(password, _DUMMY_HASH)
-        # ユーザーとパスワードどちらが間違っているか教えない（セキュリティのため）
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="メールアドレスまたはパスワードが正しくありません",
         )
 
-    # アカウントロックのチェック
-    if user.locked_until and user.locked_until > datetime.now(timezone.utc).replace(tzinfo=None):
-        remaining = int((user.locked_until - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds() / 60) + 1
+    # アカウントロックチェック（DBのlocked_untilはtznaive）
+    now = datetime.utcnow()
+    if user.locked_until and user.locked_until > now:
+        remaining_minutes = max(1, int((user.locked_until - now).total_seconds() // 60))
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
-            detail=f"アカウントがロックされています。あと約{remaining}分後に再試行してください",
+            detail=f"アカウントがロックされています。あと約{remaining_minutes}分後に再試行してください",
         )
 
-    # パスワードの検証
+    # パスワード検証
     if not verify_password(password, user.hashed_password):
-        # ログイン失敗回数を増やす
         user.failed_login_count += 1
 
-        # LOGIN_FAILURE_LIMIT 回以上失敗したらロックする
         if user.failed_login_count >= LOGIN_FAILURE_LIMIT:
-            user.locked_until = (
-                datetime.now(timezone.utc).replace(tzinfo=None)
-                + timedelta(minutes=LOGIN_LOCK_DURATION_MINUTES)
-            )
+            user.locked_until = now + timedelta(minutes=LOGIN_LOCK_DURATION_MINUTES)
             db.commit()
-            logger.warning(
-                "アカウントロック: email_prefix=%s, failures=%d",
-                email[:3], user.failed_login_count
-            )
+            logger.warning("アカウントロック: id=%d, failures=%d", user.id, user.failed_login_count)
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
                 detail=f"ログイン失敗が{LOGIN_FAILURE_LIMIT}回に達しました。"
@@ -165,79 +155,96 @@ def authenticate_user(email: str, password: str, db: Session) -> User:
     user.failed_login_count = 0
     user.locked_until = None
     db.commit()
-
     return user
 
 
-def login_user(email: str, password: str, db: Session) -> TokenResponse:
+def login_user(email: str, password: str, db: Session) -> tuple[str, str]:
     """
-    認証情報を検証してJWTトークンを返します。
-
-    Args:
-        email: メールアドレス
-        password: パスワード
-        db: DBセッション
+    認証情報を検証してトークンペアを返します。
 
     Returns:
-        アクセストークンとリフレッシュトークン
+        (access_token, raw_refresh_token) のタプル
     """
     user = authenticate_user(email, password, db)
     access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token(user.id)
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    raw_refresh_token = _issue_refresh_token_to_db(user.id, db)
+    return access_token, raw_refresh_token
 
 
-def refresh_tokens(refresh_token: str, db: Session) -> TokenResponse:
+def rotate_refresh_token(raw_token: str, db: Session) -> tuple[str, str]:
     """
-    リフレッシュトークンを検証して新しいトークンペアを返します。
+    リフレッシュトークンを検証し、Refresh Token Rotationで新しいトークンペアを返します。
 
-    【リフレッシュトークンとは？】
-    アクセストークンの有効期限は30分と短い。しかし毎回ログインは不便なので、
-    7日間有効なリフレッシュトークンを使って新しいアクセストークンを取得できる。
-
-    Args:
-        refresh_token: リフレッシュトークン（クライアントが保存しているもの）
-        db: DBセッション
-
-    Returns:
-        新しいアクセストークンとリフレッシュトークン
+    【Refresh Token Rotation】
+    トークンを一度使うたびに古いものを失効させ新しいものを発行します。
+    失効済みトークンが再使用された場合（リプレイ攻撃）、
+    そのユーザーの全セッションを強制終了します。
 
     Raises:
-        HTTPException 401: リフレッシュトークンが無効・期限切れの場合
+        HTTPException 401: トークンが無効・失効済み・期限切れの場合
     """
-    try:
-        user_id = decode_refresh_token(refresh_token)
-    except ValueError as e:
+    token_hash = hash_token(raw_token)
+    record = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == token_hash
+    ).first()
+
+    if not record:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"リフレッシュトークンが無効です: {e}",
-        ) from e
+            detail="リフレッシュトークンが無効です",
+        )
 
-    # ユーザーの存在確認
-    user = db.get(User, user_id)
+    # 失効済みトークンの再使用 → リプレイ攻撃の可能性 → 全セッション強制終了
+    if record.is_revoked:
+        _revoke_all_tokens_for_user(record.user_id, db)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="セキュリティ上の理由により再ログインが必要です",
+        )
+
+    # 有効期限切れ（tznaive同士で比較）
+    if record.expires_at < datetime.utcnow():
+        record.is_revoked = True
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="リフレッシュトークンの有効期限が切れています",
+        )
+
+    user = db.get(User, record.user_id)
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="ユーザーが見つかりません",
         )
 
-    # 新しいトークンペアを発行
+    # 古いトークンを失効させて新しいトークンを発行（Rotation）
+    record.is_revoked = True
+    db.commit()
+
     new_access_token = create_access_token(user.id)
-    new_refresh_token = create_refresh_token(user.id)
-    return TokenResponse(
-        access_token=new_access_token,
-        refresh_token=new_refresh_token,
-    )
+    new_raw_refresh_token = _issue_refresh_token_to_db(user.id, db)
+    return new_access_token, new_raw_refresh_token
+
+
+def revoke_refresh_token(raw_token: str, db: Session) -> None:
+    """
+    指定されたリフレッシュトークンを失効させます（ログアウト用）。
+    存在しない場合はエラーを発生させずに無視します。
+    """
+    token_hash = hash_token(raw_token)
+    record = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == token_hash
+    ).first()
+
+    if record and not record.is_revoked:
+        record.is_revoked = True
+        db.commit()
+        logger.info("リフレッシュトークンを失効: user_id=%d", record.user_id)
 
 
 def get_me(user: User) -> MeResponse:
     """
     UserオブジェクトをMeResponseスキーマに変換して返します。
-
-    Args:
-        user: 認証済みのUserオブジェクト
-
-    Returns:
-        ユーザー情報（id, email, is_active, created_at）
     """
     return MeResponse.model_validate(user)

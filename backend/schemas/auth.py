@@ -63,40 +63,18 @@ class TokenResponse(BaseModel):
     認証成功時のレスポンススキーマ。
     登録・ログイン・トークンリフレッシュ時に返されます。
 
+    【Cookie によるリフレッシュトークン管理】
+    リフレッシュトークンは HttpOnly Cookie で送信するため、レスポンスボディには含めません。
+    フロントエンドはアクセストークンのみを受け取り、メモリ上で管理します。
+
     Attributes:
         access_token: APIアクセスに使う短命なJWTトークン（有効期限30分）
-        refresh_token: アクセストークンを更新するための長命なJWTトークン（有効期限7日）
         token_type: トークンの種類（常に "bearer"）
     """
 
     access_token: str
-    refresh_token: str
     # デフォルト値を設定しているので、レスポンスを作るとき token_type は省略可能
     token_type: str = "bearer"
-
-
-class RefreshRequest(BaseModel):
-    """
-    トークンリフレッシュリクエストのスキーマ。
-    POST /api/auth/refresh のリクエストボディに対応します。
-
-    Attributes:
-        refresh_token: 保存しておいたリフレッシュトークン
-    """
-
-    refresh_token: str
-
-
-class LogoutRequest(BaseModel):
-    """
-    ログアウトリクエストのスキーマ。
-    POST /api/auth/logout のリクエストボディに対応します。
-
-    Attributes:
-        refresh_token: 無効化したいリフレッシュトークン
-    """
-
-    refresh_token: str
 
 
 class MeResponse(BaseModel):

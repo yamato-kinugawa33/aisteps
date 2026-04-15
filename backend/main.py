@@ -56,6 +56,7 @@ async def lifespan(app: FastAPI):
     """
     # モデルをインポートして Base に登録する必要がある（テーブル定義を Base に認識させる）
     import models.user  # noqa: F401
+    import models.refresh_token  # noqa: F401
     import models.roadmap  # noqa: F401
 
     # DBにテーブルが存在しない場合のみ新規作成する（既存テーブルには影響なし）

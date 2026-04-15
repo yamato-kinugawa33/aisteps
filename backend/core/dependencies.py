@@ -60,7 +60,7 @@ def get_current_user(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"認証トークンが無効です: {e}",
+            detail="認証が必要です",  # 内部エラーの詳細は含めない（T11対策）
             # WWW-Authenticate ヘッダー: クライアントに「Bearerトークンが必要」と伝える
             headers={"WWW-Authenticate": "Bearer"},
         ) from e

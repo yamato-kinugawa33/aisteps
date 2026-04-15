@@ -1,25 +1,32 @@
 """
 core/security.py
 
-パスワードハッシュ化とJWT（JSON Web Token）の生成・検証を行うユーティリティモジュールです。
+パスワードハッシュ化とJWT（JSON Web Token）の生成・検証、
+および不透明リフレッシュトークンの生成・ハッシュ化を行うユーティリティモジュールです。
 
 【このファイルの役割】
 - パスワードの安全な保存（bcryptハッシュ化）
-- ログイン後に発行するJWTトークンの生成とデコード
+- ログイン後に発行するJWTアクセストークンの生成とデコード
+- リフレッシュトークン（ランダム文字列）の生成とSHA-256ハッシュ化
 
 【bcryptとは？】
 パスワードを安全に保存するための「ハッシュ関数」です。
 - 同じパスワードでも毎回異なるハッシュ値になる（ソルトが自動付与される）
 - ハッシュから元のパスワードを逆算することが極めて困難
-- 処理に意図的に時間をかけることでブルートフォース攻撃を防ぐ
+- rounds=12: 処理に意図的に時間をかけることでブルートフォース攻撃を防ぐ
 
 【JWTとは？】
 ユーザーが「ログイン済みであること」を証明する暗号化されたトークンです。
-- ヘッダー.ペイロード.署名 の3パートからなる文字列
-- 署名を検証することで改ざんを検知できる
+短命（30分）なため、アクセストークンとして使用します。
+
+【リフレッシュトークンとは？】
+secrets.token_urlsafe()で生成するランダムな文字列です（JWTではない）。
+DB管理で即時失効できるため、長命（7日）なリフレッシュ用として使います。
 """
 
+import hashlib
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -36,7 +43,7 @@ JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"]
 # 署名アルゴリズム: HS256 = HMAC-SHA256（共通鍵方式）
 ALGORITHM = "HS256"
 
-# アクセストークンの有効期限（30分）
+# アクセストークンの有効期限（30分: 短命なので盗まれても被害を最小化できる）
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # リフレッシュトークンの有効期限（7日）
@@ -63,9 +70,10 @@ def hash_password(password: str) -> str:
     """
     if not password:
         raise ValueError("パスワードが空です")
-    # gensalt() が自動でランダムなソルト（128bit）を生成する
-    # ソルトとはハッシュのランダム化に使う値で、同じパスワードでも毎回異なるハッシュになる
-    salt = bcrypt.gensalt()
+    # gensalt(rounds=12): コストファクターを12に明示設定（仕様書要件）
+    # コストファクターが高いほどハッシュ計算に時間がかかりブルートフォースが難しくなる
+    # 12 ≈ ログイン1回あたり約0.3秒（セキュリティと利便性のバランス）
+    salt = bcrypt.gensalt(rounds=12)
     hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
     return hashed.decode("utf-8")
 
@@ -90,7 +98,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 # ─────────────────────────────────────────────
-# JWTトークン管理
+# JWTアクセストークン管理
 # ─────────────────────────────────────────────
 
 def create_access_token(user_id: int, expires_delta: timedelta | None = None) -> str:
@@ -112,35 +120,13 @@ def create_access_token(user_id: int, expires_delta: timedelta | None = None) ->
     # "sub" (subject): 誰のトークンか = ユーザーID（文字列として保存）
     # "exp" (expiration): 有効期限
     # "iat" (issued at): 発行日時
-    # "type": アクセストークンであることを明示
+    # "type": アクセストークンであることを明示（リフレッシュトークンと区別するため）
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "exp": now + expires_delta,
         "iat": now,
         "type": "access",
-    }
-    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=ALGORITHM)
-
-
-def create_refresh_token(user_id: int) -> str:
-    """
-    リフレッシュトークン（JWT）を生成して返します。
-    アクセストークンの期限切れ後に新しいアクセストークンを取得するためのトークンです。
-
-    Args:
-        user_id: JWTに埋め込むユーザーID
-
-    Returns:
-        JWT文字列
-    """
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": str(user_id),
-        "exp": now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
-        "iat": now,
-        # リフレッシュトークンをアクセストークンと区別するためのフィールド
-        "type": "refresh",
     }
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=ALGORITHM)
 
@@ -158,43 +144,68 @@ def decode_access_token(token: str) -> int:
 
     Raises:
         ValueError: トークンが無効・期限切れ・改ざんされている場合
+        ValueError: アクセストークン以外のトークンが渡された場合
     """
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError as e:
         raise ValueError("トークンの有効期限が切れています") from e
     except jwt.InvalidTokenError as e:
-        raise ValueError(f"無効なトークンです: {e}") from e
+        # 内部エラーの詳細はログに残すが、呼び出し元には汎用メッセージを返す
+        raise ValueError("無効なトークンです") from e
 
-    # トークンの種別チェック: アクセストークンでないと拒否
+    # トークンの種別チェック: アクセストークン以外は拒否
+    # リフレッシュトークンをアクセストークンとして使い回す攻撃を防ぐ
     if payload.get("type") != "access":
-        raise ValueError("トークン種別が不正です（access が必要です）")
+        raise ValueError("トークン種別が不正です（accessトークンが必要です）")
 
     return int(payload["sub"])
 
 
-def decode_refresh_token(token: str) -> int:
-    """
-    リフレッシュトークンをデコードしてユーザーIDを返します。
+# ─────────────────────────────────────────────
+# 不透明リフレッシュトークン管理
+# ─────────────────────────────────────────────
 
-    Args:
-        token: JWTリフレッシュトークン文字列
+def generate_refresh_token() -> str:
+    """
+    ランダムな不透明リフレッシュトークンを生成します。
+
+    【JWTではなくランダム文字列を使う理由】
+    JWTはデコードすれば有効期限が確認できる「自己完結型」トークンです。
+    リフレッシュトークンはDBで管理して即時失効できるようにしたいため、
+    情報を持たないランダム文字列（不透明トークン）を使います。
 
     Returns:
-        トークンに埋め込まれたユーザーID（整数）
-
-    Raises:
-        ValueError: トークンが無効・期限切れ・改ざんされている場合
+        URL安全なランダム文字列（44文字, 256bit相当のエントロピー）
     """
-    try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[ALGORITHM])
-    except jwt.ExpiredSignatureError as e:
-        raise ValueError("リフレッシュトークンの有効期限が切れています") from e
-    except jwt.InvalidTokenError as e:
-        raise ValueError(f"無効なリフレッシュトークンです: {e}") from e
+    # token_urlsafe(32): 32バイト = 256ビットのランダムデータをBase64URL encode
+    return secrets.token_urlsafe(32)
 
-    # トークンの種別チェック: リフレッシュトークンでないと拒否
-    if payload.get("type") != "refresh":
-        raise ValueError("トークン種別が不正です（refresh が必要です）")
 
-    return int(payload["sub"])
+def hash_token(raw_token: str) -> str:
+    """
+    トークン文字列をSHA-256でハッシュ化して返します。
+    DBにはハッシュ値のみを保存し、生の値は保存しません。
+
+    【なぜハッシュ化して保存するのか？】
+    DBが漏洩した場合でも、ハッシュ値からは元のトークンを復元できないため、
+    攻撃者がトークンを悪用することを防げます。
+
+    Args:
+        raw_token: 生のトークン文字列
+
+    Returns:
+        SHA-256ハッシュの16進数文字列（64文字）
+    """
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def get_refresh_token_expiry() -> datetime:
+    """
+    リフレッシュトークンの有効期限日時を返します（DBに保存するutc時刻）。
+
+    Returns:
+        現在時刻 + REFRESH_TOKEN_EXPIRE_DAYS のUTC datetime（tznaive）
+    """
+    # DBには timezone-naive の datetime を保存（PostgreSQLのDateTimeと合わせる）
+    return datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
