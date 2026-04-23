@@ -2,6 +2,7 @@ import os
 
 # テスト用環境変数を最初に設定する（モジュールインポート前に必要）
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing")
+os.environ.setdefault("GEMINI_API_KEY", "dummy-key-for-testing")
 os.environ.setdefault(
     "DATABASE_URL", "postgresql://localhost/test"
 )  # get_dbをオーバーライドするので実際には使わない
@@ -78,9 +79,20 @@ def db_session(setup_db):
     connection.close()
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """テスト中はレート制限を無効化する"""
+    from routers.auth import limiter
+    limiter.enabled = False
+    yield
+    limiter.enabled = True
+
+
 @pytest.fixture
 def client(db_session):
     """DB差し替え済みのFastAPI TestClient"""
+    from unittest.mock import patch
+
     # main.pyのインポート時にDBへの接続が発生するため、遅延インポートする
     from main import app
 
@@ -91,8 +103,10 @@ def client(db_session):
             pass
 
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
-        yield c
+    # lifespan内のcreate_allが本物のPostgresに接続しないようモックする
+    with patch("main.Base.metadata.create_all"):
+        with TestClient(app) as c:
+            yield c
     app.dependency_overrides.clear()
 
 
