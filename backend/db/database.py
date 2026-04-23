@@ -23,6 +23,11 @@ def _init_db() -> None:
         _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 
 
+def get_engine():
+    _init_db()
+    return _engine
+
+
 def get_db():
     _init_db()
     db = _SessionLocal()

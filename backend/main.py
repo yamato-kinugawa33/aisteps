@@ -4,19 +4,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+_missing = [v for v in ("DATABASE_URL", "GEMINI_API_KEY", "ALLOWED_ORIGINS") if not os.getenv(v)]
+if _missing:
+    raise ValueError(f"Required environment variables are not set: {', '.join(_missing)}")
+
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from db.database import Base, engine  # noqa: E402
+from db.database import Base, get_engine  # noqa: E402
 from routers import roadmap  # noqa: E402
 
-Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=get_engine())
 
 app = FastAPI(title="Career Roadmap Generator")
 
 origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
-if not origins:
-    raise ValueError("ALLOWED_ORIGINS is not set")
 
 app.add_middleware(
     CORSMiddleware,
