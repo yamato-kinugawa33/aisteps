@@ -6,10 +6,17 @@ from pathlib import Path
 import yaml
 from google import genai
 
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    raise ValueError("GEMINI_API_KEY is not set")
-client = genai.Client(api_key=api_key)
+_client: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY is not set")
+        _client = genai.Client(api_key=api_key)
+    return _client
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 with open(PROMPTS_DIR / "config.yaml", encoding="utf-8") as f:
@@ -45,6 +52,7 @@ def run_pipeline(goal: str) -> tuple[dict, str, dict, str, int, int]:
         (initial_json, critique_text, final_json, model_name,
          total_input_tokens, total_output_tokens)
     """
+    client = _get_client()
     r1 = client.models.generate_content(
         model=MODEL, contents=INITIAL_PROMPT.format(goal=goal)
     )
